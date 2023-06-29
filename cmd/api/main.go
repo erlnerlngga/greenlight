@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"flag"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/erlnerlngga/greenlight/internal/data"
 	"github.com/erlnerlngga/greenlight/internal/jsonlog"
+	"github.com/erlnerlngga/greenlight/internal/mailer"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -30,6 +33,16 @@ type config struct {
 		burst   int
 		enabled bool // for enable or disable rate limiting
 	}
+	smtp struct {
+		host     string
+		port     int
+		username string
+		password string
+		sender   string
+	}
+	cors struct {
+		trustedOrigins []string
+	}
 }
 
 // dependencies HTTP, handlers, helpers, middleware, logger
@@ -37,6 +50,8 @@ type application struct {
 	config config
 	logger *jsonlog.Logger
 	models data.Models
+	mailer mailer.Mailer
+	wg     sync.WaitGroup
 }
 
 func init() {
@@ -61,6 +76,15 @@ func main() {
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum request per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
 	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+	flag.StringVar(&cfg.smtp.host, "smtp-host", "smtp.mailtrap.io", "SMTP host")
+	flag.IntVar(&cfg.smtp.port, "smtp-port", 2525, "SMTP port")
+	flag.StringVar(&cfg.smtp.username, "smtp-username", "ac0c56c007dbf9", "SMTP username")
+	flag.StringVar(&cfg.smtp.password, "smtp-password", "7883e23ff45b2e", "SMTP password")
+	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "Greenlight <no-reply@greenlight.alexedwards.net>", "SMTP sender")
+	flag.Func("cors-trusted-origins", "Trusted CORS origins (space separated)", func(val string) error {
+		cfg.cors.trustedOrigins = strings.Fields(val)
+		return nil
+	})
 	flag.Parse()
 
 	logger := jsonlog.New(os.Stdout, jsonlog.LevelInfo)
@@ -79,6 +103,7 @@ func main() {
 		config: cfg,
 		logger: logger,
 		models: data.NewModels(db),
+		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 	}
 
 	// Call app.serve() to start the server.

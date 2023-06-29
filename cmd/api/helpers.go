@@ -182,3 +182,26 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 	// Otherwise, return the converted integer value.
 	return i
 }
+
+// The background() helper accepts an arbitrary function as a parameter.
+func (app *application) background(fn func()) {
+	// Increment the WaitGroup counter.
+	app.wg.Add(1)
+
+	// Launch a background goroutine.
+	go func() {
+		// Use defer to decrement the WaitGroup counter before the goroutine returns.
+		defer app.wg.Done()
+
+		// Run a deferred function which uses recover() to catch any panic and log an,
+		// error message instead of terminating the application.
+		defer func() {
+			if err := recover(); err != nil {
+				app.logger.PrintError(fmt.Errorf("%s", err), nil)
+			}
+		}()
+
+		// Execute the arbitrary function that we passed as the parameter.
+		fn()
+	}()
+}
