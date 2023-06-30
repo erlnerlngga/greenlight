@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"expvar"
 	"flag"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +19,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const version = "1.0.0"
+// Create a buildTime variable to hold the executable binary build time. Note that this must be a string
+// type, as the -X linker flag will only work with string variables.
+var (
+	buildTime string
+	version   string
+)
 
 // config setting
 type config struct {
@@ -85,7 +93,15 @@ func main() {
 		cfg.cors.trustedOrigins = strings.Fields(val)
 		return nil
 	})
+	displayVersion := flag.Bool("version", false, "Display version and exit")
 	flag.Parse()
+
+	// If the version flag value is true, then print out the version number and immediately exit.
+	if *displayVersion {
+		fmt.Printf("Version:\t%s\n", version)
+		fmt.Printf("Build time:\t%s\n", buildTime)
+		os.Exit(0)
+	}
 
 	logger := jsonlog.New(os.Stdout, jsonlog.LevelInfo)
 
@@ -97,6 +113,25 @@ func main() {
 
 	defer db.Close()
 	logger.PrintInfo("database connection pool established", nil)
+
+	// Publish a new "version" variable in the expvar handler containing our application version number
+	// (currently the constant "1.0.0").
+	expvar.NewString("version").Set(version)
+
+	// Publish the number of active goroutines.
+	expvar.Publish("goroutines", expvar.Func(func() any {
+		return runtime.NumGoroutine()
+	}))
+
+	// Publish the database connection pool statistics.
+	expvar.Publish("database", expvar.Func(func() any {
+		return db.Stats()
+	}))
+
+	// Publish the current Unix timestamp.
+	expvar.Publish("timestamp", expvar.Func(func() any {
+		return time.Now().Unix()
+	}))
 
 	// declare instance application
 	app := &application{
